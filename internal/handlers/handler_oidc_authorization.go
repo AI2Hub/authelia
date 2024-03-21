@@ -28,12 +28,22 @@ func OpenIDConnectAuthorization(ctx *middlewares.AutheliaCtx, rw http.ResponseWr
 		err       error
 	)
 
-	if requester, err = ctx.Providers.OpenIDConnect.NewAuthorizeRequest(ctx, r); err != nil {
+	requester, err = ctx.Providers.OpenIDConnect.NewAuthorizeRequest(ctx, r)
+
+	if requester != nil && requester.GetResponseMode() == oidc.ResponseModeFormPost {
+		ctx.SetUserValue(middlewares.UserValueKeyOpenIDConnectResponseModeFormPost, true)
+	}
+
+	if err != nil {
 		ctx.Logger.Errorf("Authorization Request failed with error: %s", oauthelia2.ErrorToDebugRFC6749Error(err))
 
 		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, err)
 
 		return
+	}
+
+	if requester.GetResponseMode() == oidc.ResponseModeFormPost {
+		ctx.SetUserValue(middlewares.UserValueKeyOpenIDConnectResponseModeFormPost, true)
 	}
 
 	clientID := requester.GetClient().GetID()
@@ -76,6 +86,24 @@ func OpenIDConnectAuthorization(ctx *middlewares.AutheliaCtx, rw http.ResponseWr
 		return
 	}
 
+	if requester.GetRequestForm().Get(oidc.FormParameterPrompt) == oidc.PromptNone {
+		if userSession.IsAnonymous() {
+			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: the 'prompt' type of 'none' was requested but the user is not logged in", requester.GetID(), client.GetID())
+
+			ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oauthelia2.ErrLoginRequired)
+
+			return
+		}
+
+		if client.GetConsentPolicy().Mode == oidc.ClientConsentModeExplicit {
+			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: the 'prompt' type of 'none' was requested but client is configured to require explicit consent", requester.GetID(), client.GetID())
+
+			ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oauthelia2.ErrConsentRequired)
+
+			return
+		}
+	}
+
 	issuer = ctx.RootURL()
 
 	if consent, handled = handleOIDCAuthorizationConsent(ctx, issuer, client, userSession, rw, r, requester); handled {
@@ -115,13 +143,6 @@ func OpenIDConnectAuthorization(ctx *middlewares.AutheliaCtx, rw http.ResponseWr
 		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oidc.ErrConsentCouldNotSave)
 
 		return
-	}
-
-	if requester.GetResponseMode() == oidc.ResponseModeFormPost {
-		ctx.Logger.Debug("Setting Response Mode Form Post")
-		ctx.SetUserValue(middlewares.UserValueKeyOpenIDConnectResponseModeFormPost, true)
-	} else {
-		ctx.Logger.Debugf("Response Mode note Set Form Post %s", requester.GetResponseMode())
 	}
 
 	responder.GetParameters().Set(oidc.FormParameterIssuer, issuer.String())

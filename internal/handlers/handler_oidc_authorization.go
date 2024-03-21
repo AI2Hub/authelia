@@ -118,7 +118,10 @@ func OpenIDConnectAuthorization(ctx *middlewares.AutheliaCtx, rw http.ResponseWr
 	}
 
 	if requester.GetResponseMode() == oidc.ResponseModeFormPost {
+		ctx.Logger.Debug("Setting Response Mode Form Post")
 		ctx.SetUserValue(middlewares.UserValueKeyOpenIDConnectResponseModeFormPost, true)
+	} else {
+		ctx.Logger.Debugf("Response Mode note Set Form Post %s", requester.GetResponseMode())
 	}
 
 	responder.GetParameters().Set(oidc.FormParameterIssuer, issuer.String())
